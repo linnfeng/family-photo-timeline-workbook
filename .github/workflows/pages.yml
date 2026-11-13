@@ -1,0 +1,55 @@
+# Render the existing workbook, including its https://growingupvideo.video/ resource link.
+name: Publish workbook to Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render the workbook
+        run: |
+          mkdir -p site
+          python3 - <<'PY'
+          from pathlib import Path
+          import html, re
+          source = Path('README.md').read_text(encoding='utf-8')
+          def inline(text):
+              text = html.escape(text)
+              text = re.sub(r'!\[([^\]]*)\]\((https://[^ )]+)\)', r'<img alt="\1" src="\2">', text)
+              return re.sub(r'\[([^\]]+)\]\((https://[^ )]+)\)', r'<a href="\2">\1</a>', text)
+          parts = []
+          for block in source.strip().split('\n\n'):
+              if block.startswith('# '):
+                  parts.append('<h1>' + inline(block[2:]) + '</h1>')
+              elif block.startswith('## '):
+                  parts.append('<h2>' + inline(block[3:]) + '</h2>')
+              elif block.startswith('- '):
+                  items = [line[2:] for line in block.splitlines() if line.startswith('- ')]
+                  parts.append('<ul>' + ''.join('<li>' + inline(item) + '</li>' for item in items) + '</ul>')
+              else:
+                  parts.append('<p>' + inline(block.replace('\n', ' ')) + '</p>')
+          page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Family photo timeline planning workbook</title><style>body{font:18px/1.65 system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1rem;color:#202632}img{max-width:150px;height:auto}a{color:#2454a6}li{margin:.5rem 0}</style></head><body><main>' + '\n'.join(parts) + '</main></body></html>'
+          Path('site/index.html').write_text(page, encoding='utf-8')
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
